@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>IP Lookup Results</title>
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/ionicons/3.0.0/css/ionicons.css" rel="stylesheet">
+    <link href="./static/theme.css" rel="stylesheet">
+    <script src="//ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+    <!-- Additional styles specific to your page -->
+</head>
+<body data-spy="scroll" data-target="#navbar1" data-offset="60">
+    <header class="bg-primary">
+        <div class="container h-100">
+            <div class="row h-100">
+                <div class="col-12">
+                    
+<div class="text-center m-0 vh-100 d-flex flex-column justify-content-center text-light">
+    <h1 class="display-4">CyberToolkit</h1>
+    <p class="lead">Results for {{ host_info['ip_str'] }}</p>
+  </div>
+  
+  <!-- Add a button to toggle the collapsible section -->
+  <button class="toggle-button" onclick="toggleCollapsible()">Toggle Results</button>
+  
+  <!-- Collapsible section -->
+  <div class="collapsible-content">
+    <h1 class="text-center my-4">Results for {{ host_info['ip_str'] }}</h1>
+    {% for key, value in host_info.items() %}
+      {% if key != '_shodan' and key != 'vulns' %}
+        <div class="mb-4">
+          <h2>{{ key }}</h2>
+          {% if value is mapping %}
+            {% for sub_key, sub_value in value.items() %}
+              <p><strong>{{ sub_key }}:</strong> {{ sub_value }}</p>
+            {% endfor %}
+          {% else %}
+            <p>{{ value }}</p>
+          {% endif %}
+        </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</header>
+
+    <div id="firewall_rules" class="container mt-4">
+        <h1>Firewall Rule Generator</h1>
+        <form action="/generate_rule" method="post">
+
+            <label for="ip_address">Target IP Address:</label>
+            <input type="text" id="ip_address" name="ip_address" required><br>
+    
+            <label for="action">Action:</label>
+            <select name="action" required>
+                <option value="allow">Allow</option>
+                <option value="block">Block</option>
+                <option value="filter">Filter</option>
+            </select><br>
+    
+            <label for="filter_ip">Filter IP(Only for Filter action):</label>
+            <input type="text" name="filter_ip"><br>
+    
+            <label for="os_type">Operating System:</label>
+            <select name="os_type" required>
+                <option value="linux">Linux</option>
+                <option value="windows">Windows</option>
+                <option value="osx">OSX</option>
+            </select><br>
+    
+            <button type="submit">Generate Rule</button>
+        </form>
+    
+        <div id="generated-rules-container"></div>
+    </div>
+    <div id="openPorts" class="container mt-4">
+        <h2>Open Ports</h2>
+        <ul>
+            {% for port in host_info.ports %}
+                <li>{{ port }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    
+    <div class="container mt-5">
+        <div id="average_score" class="container mt-4"></div>
+
+            <canvas id="vulnerabilityChart" width="400" height="200"></canvas>
+        <div id="cve_info" class="container mt-4">
+            <h2>CVE Information</h2>
+            {% if cve_info %}
+                {% for cve, cve_data in cve_info.items() %}
+                    <div class="mb-4">
+                        <h3>{{ cve }}</h3>
+                        {% if cve_data['VulnerabilityScore'] is defined %}
+                            <p>Calculated Vulnerability Score: {{ cve_data['VulnerabilityScore'] }}</p>
+                        {% endif %}
+                        {% if 'Error' in cve_data %}
+                            <p>{{ cve_data['Error'] }}</p>
+                        {% else %}
+                            <p>Description: {{ cve_data['NVDData']['result']['CVE_Items'][0]['cve']['description']['description_data'][0]['value'] }}</p>
+                            <p>Reference: {{ cve_data['NVDData']['result']['CVE_Items'][0]['references']['reference_data'][0]['url'] }}</p>
+                            <p>NIST.gov Response: {{ cve_data['NVDData']|tojson|safe }}</p>
+                            
+                            <!-- Include baseMetricV2 information if available -->
+                            {% if 'impact' in cve_data and 'baseMetricV2' in cve_data['impact'] %}
+                                <h3>Base Metrics V2</h3>
+                                <pre>{{ cve_data['impact']['baseMetricV2'] | tojson(indent=2) }}</pre>
+                            {% endif %}
+                            
+                            <!-- Display CSV information -->
+                            <p>CSV Information:</p>
+                            <p>ID: {{ cve_data['ID'] }}</p>
+                            <p>Version: {{ cve_data['Version'] }}</p>
+                            <!-- Include other columns as needed -->
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            {% else %}
+                <p></p>
+            {% endif %}
+        </div>
+    </div>
+
+
+    
+
+    <footer id="footer" class="bg-dark text-light py-5">
+        <div class="container py-5">
+            <!-- Footer content for resultingpage.html goes here -->
+        </div>
+    </footer>
+
+
+    <script>
+        $(document).ready(function() {
+            // Function to calculate average score
+            function calculateAverageScore(data) {
+                var totalScore = 0;
+                var count = 0;
+
+                for (var index in data) {
+                    if (data.hasOwnProperty(index)) {
+                        var cveData = data[index];
+
+                        if (typeof cveData === 'object' && cveData !== null) {
+                            if (cveData['VulnerabilityScore'] !== undefined) {
+                                totalScore += cveData['VulnerabilityScore'];
+                                count++;
+                            }
+                        }
+                    }
+                }
+
+                // Calculate the average vulnerability score
+                return count > 0 ? totalScore / count : 0;
+            }
+
+            // Function to create Chart.js chart
+            function createChart(averageScore) {
+                // Use Chart.js to create a chart
+                var ctx = document.getElementById('vulnerabilityChart').getContext('2d');
+
+                var myChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Average System Vulnerability Score'],
+                        datasets: [{
+                            label: 'Systems Vulnerability Score',
+                            data: [averageScore],
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            borderColor: 'rgb(255, 99, 132)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 10  // You can adjust the maximum value based on your vulnerability scale
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Main function to handle data received from /cve_info
+            function handleCVEInfoData(data) {
+                console.log("Received data:", data);
+
+                // Generate firewall rules
+                var firewallRules = data.map(function(cveData) {
+                    return "Your Firewall Rule Generation Logic Here"; // Replace with your actual firewall rule generation logic
+                });
+
+                // Display firewall rules or handle as needed
+                console.log("Firewall Rules:", firewallRules);
+
+                for (var index in data) {
+                    if (data.hasOwnProperty(index)) {
+                        var cveData = data[index];
+
+                        if (typeof cveData === 'object' && cveData !== null) {
+                            var vulnerabilityInfo = "<div class='mb-4'><h3>CVE: " + cveData['CVE'] + "</h3>";
+
+                            if (cveData['VulnerabilityScore'] !== undefined) {
+                                vulnerabilityInfo += "<p>Overall calculated Vulnerability Score: " + cveData['VulnerabilityScore'] + "</p>";
+                            }
+
+                            var nvdData = cveData['NVDData'];
+                            if (nvdData && nvdData['result'] && nvdData['result']['CVE_Items'] && nvdData['result']['CVE_Items'][0]) {
+                                var cveItem = nvdData['result']['CVE_Items'][0];
+
+                                if (cveItem['cve'] && cveItem['cve']['description'] && cveItem['cve']['description']['description_data']) {
+                                    vulnerabilityInfo += "<p>Description: " + cveItem['cve']['description']['description_data'][0]['value'] + "</p>";
+                                }
+                            }
+
+                            vulnerabilityInfo += "</div>";
+                            $("#cve_info").append(vulnerabilityInfo);
+                        } else {
+                            $("#cve_info").append("<p>" + cveData + "</p>");
+                        }
+                    }
+                }
+
+                // Calculate the average vulnerability score
+                var averageScore = calculateAverageScore(data);
+
+                // Display the average score on the page
+                $("#average_score").text("System Vulnerability Score: " + averageScore);
+
+                // Use Chart.js to create a chart
+                createChart(averageScore);
+            }
+
+            // Make AJAX request to /cve_info when the document is ready
+            $.post("/cve_info", { ip_address: "{{ host_info['ip_str'] }}" }, handleCVEInfoData);
+
+            // Fetch firewall rules using /generate_rules
+        fetch("/generate_rules", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",  // Set Content-Type to JSON
+            },
+            body: JSON.stringify({ ip_address: "{{ host_info['ip_str'] }}" }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log("Received firewall rules:", data);
+
+            // Display or use firewall rules as needed
+        })
+        .catch(error => {
+            console.error("Error:", error);
+        });
+    });
+
+    var ipAddressFromResults = "{{ host_info['ip_str'] }}"; // Replace with the correct variable name
+
+    // Set the value of the input field
+    document.getElementById("ip_address").value = ipAddressFromResults;
+    $(document).ready(function() {
+            // Provide user feedback for loading open ports
+            $('form').submit(function(event) {
+                event.preventDefault();  // Prevent the default form submission
+                $('#loading').show();
+    
+                // Use AJAX to submit the form
+                $.ajax({
+                    type: 'POST',
+                    url: '/generate_rule',
+                    data: $('form').serialize(),  // Serialize the form data
+                    dataType: 'json',  // Specify the expected data type
+                    success: function(data) {
+                        $('#loading').hide();
+    
+                        // Log the received data to the console for debugging
+                        console.log(data);
+    
+                        // Update the page with the generated rules
+                        $('#generated-rules-container').html('');
+                        if (data.firewall_rules) {
+                            for (const firewall_rule of data.firewall_rules) {
+                                $('#generated-rules-container').append(`<pre>${firewall_rule}</pre><br>`);
+                            }
+                        } else {
+                            $('#generated-rules-container').append('<p>No firewall rules generated.</p>');
+                        }
+                    },
+                    error: function(jqXHR, textStatus, errorThrown) {
+                        $('#loading').hide();
+                        console.error('Error:', textStatus, errorThrown);
+                        // Log additional details about the error
+                        console.log(jqXHR.responseText);
+    
+                        // Display an error message on the page
+                        $('#generated-rules-container').html('<p>Error: Failed to generate firewall rules.</p>');
+                    }
+                });
+            });
+        });
+        function toggleCollapsible() {
+    var collapsibleContent = document.querySelector('.collapsible-content');
+    collapsibleContent.style.display = (collapsibleContent.style.display === 'none' || collapsibleContent.style.display === '') ? 'block' : 'none';
+  }
+    </script> 
+</body>
+</html>
